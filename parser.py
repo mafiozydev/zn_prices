@@ -18,62 +18,63 @@ async def scrape_ozon(headless: bool = False, progress_callback=None):
         await stealth_async(context)
         page = await context.new_page()
 
-        # Идём на главную ozon.ru и ищем "soulway"
-        msg = "🔍 Идём на ozon.ru и ищем Soulway..."
+        # Идём на ozon.com и ищем "soulway"
+        msg = "🌍 Идём на ozon.com и ищем Soulway..."
         print(msg)
         if progress_callback: progress_callback(msg)
 
-        await page.goto("https://www.ozon.ru/", wait_until="networkidle", timeout=60000)
-        await page.wait_for_timeout(2000)
+        await page.goto("https://www.ozon.com/", wait_until="networkidle", timeout=60000)
+        await page.wait_for_timeout(2500)
 
-        # Находим строку поиска и вводим запрос
-        search_input = page.locator('input[placeholder*="Искать"]').first
+        # Поиск на английской версии ozon.com
+        search_input = page.locator('input[placeholder*="Search"], input[placeholder*="What are you looking"]').first
         await search_input.click()
         await search_input.fill("soulway")
         await page.keyboard.press("Enter")
-        await page.wait_for_timeout(5000)
+        await page.wait_for_timeout(6000)
 
         # Прокручиваем результаты
-        for _ in range(4):
+        for _ in range(5):
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            await page.wait_for_timeout(2500)
+            await page.wait_for_timeout(2800)
 
         content = await page.content()
         soup = BeautifulSoup(content, "lxml")
 
-        # Селекторы результатов поиска Ozon
+        # Селекторы для ozon.com
         products = soup.select('div[data-widget="searchResultsV2"] a[href*="/product/"]')
         if not products:
             products = soup.select('a[href*="/product/"][class*="tile"]')
         if not products:
             products = soup.select('article a[href*="/product/"]')
 
-        for link in products[:120]:
+        for link in products[:150]:
             href = link.get("href", "")
             if not href.startswith("http"):
-                href = "https://www.ozon.ru" + href
+                href = "https://www.ozon.com" + href
 
             title = ""
             title_tag = link.select_one('span, div, h3, h4')
             if title_tag:
                 title = title_tag.get_text(strip=True)
 
-            price_rub = None
+            price = None
             parent = link.find_parent()
             if parent:
                 price_text = parent.get_text()
-                price_match = re.search(r'([\d\s]{3,})\s*₽', price_text)
+                # Ищем цену в USD или другой валюте
+                price_match = re.search(r'([\d\s]{2,})\s*[$₽€]', price_text)
                 if price_match:
                     try:
-                        price_rub = float(price_match.group(1).replace(" ", ""))
+                        price = float(price_match.group(1).replace(" ", ""))
                     except:
                         pass
 
-            if price_rub and price_rub < MAX_PRICE_RUB and len(title) > 8:
-                msg = f"✅ {title[:55]}... — {price_rub} ₽"
+            if price and price < MAX_PRICE_RUB and len(title) > 8:
+                msg = f"✅ {title[:55]}... — {price} ₽/USD"
                 print(msg)
                 if progress_callback: progress_callback(msg)
-                save_product(href, title, price_rub)
+                save_product(href, title, price)
                 saved_count += 1
 
         msg = f"📦 Сохранено товаров дешевле {MAX_PRICE_RUB} ₽: {saved_count}"
