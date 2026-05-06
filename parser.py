@@ -3,7 +3,7 @@ from playwright.async_api import async_playwright
 from playwright_stealth import stealth_async
 from bs4 import BeautifulSoup
 import re
-from config import MAX_PRICE_RUB, BRAND_URLS
+from config import MAX_PRICE_RUB
 from database import save_product, init_db
 
 async def scrape_ozon(headless: bool = False, progress_callback=None):
@@ -18,59 +18,67 @@ async def scrape_ozon(headless: bool = False, progress_callback=None):
         await stealth_async(context)
         page = await context.new_page()
 
-        for url in BRAND_URLS:
-            msg = f"🔍 Парсим: {url}"
-            print(msg)
-            if progress_callback: progress_callback(msg)
+        # Идём на главную ozon.ru и ищем "soulway"
+        msg = "🔍 Идём на ozon.ru и ищем Soulway..."
+        print(msg)
+        if progress_callback: progress_callback(msg)
 
-            await page.goto(url, wait_until="networkidle", timeout=90000)
-            await page.wait_for_timeout(4000)
+        await page.goto("https://www.ozon.ru/", wait_until="networkidle", timeout=60000)
+        await page.wait_for_timeout(2000)
 
-            # Прокручиваем вниз, чтобы подгрузить все товары
+        # Находим строку поиска и вводим запрос
+        search_input = page.locator('input[placeholder*="Искать"]').first
+        await search_input.click()
+        await search_input.fill("soulway")
+        await page.keyboard.press("Enter")
+        await page.wait_for_timeout(5000)
+
+        # Прокручиваем результаты
+        for _ in range(4):
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            await page.wait_for_timeout(3000)
+            await page.wait_for_timeout(2500)
 
-            content = await page.content()
-            soup = BeautifulSoup(content, "lxml")
+        content = await page.content()
+        soup = BeautifulSoup(content, "lxml")
 
-            # Улучшенные селекторы для Ozon
-            products = soup.select('div[data-widget="searchResultsV2"] a[href*="/product/"]')
-            if not products:
-                products = soup.select('a[href*="/product/"][class*="tile-hover"]')
-            if not products:
-                products = soup.select('article a[href*="/product/"]')
+        # Селекторы результатов поиска Ozon
+        products = soup.select('div[data-widget="searchResultsV2"] a[href*="/product/"]')
+        if not products:
+            products = soup.select('a[href*="/product/"][class*="tile"]')
+        if not products:
+            products = soup.select('article a[href*="/product/"]')
 
-            for link in products[:100]:
-                href = link.get("href", "")
-                if not href.startswith("http"):
-                    href = "https://www.ozon.ru" + href
+        for link in products[:120]:
+            href = link.get("href", "")
+            if not href.startswith("http"):
+                href = "https://www.ozon.ru" + href
 
-                title = ""
-                title_tag = link.select_one('span, div, h3, h4')
-                if title_tag:
-                    title = title_tag.get_text(strip=True)
+            title = ""
+            title_tag = link.select_one('span, div, h3, h4')
+            if title_tag:
+                title = title_tag.get_text(strip=True)
 
-                price_rub = None
-                parent = link.find_parent()
-                if parent:
-                    price_text = parent.get_text()
-                    price_match = re.search(r'([\d\s]{3,})\s*₽', price_text)
-                    if price_match:
-                        try:
-                            price_rub = float(price_match.group(1).replace(" ", ""))
-                        except:
-                            pass
+            price_rub = None
+            parent = link.find_parent()
+            if parent:
+                price_text = parent.get_text()
+                price_match = re.search(r'([\d\s]{3,})\s*₽', price_text)
+                if price_match:
+                    try:
+                        price_rub = float(price_match.group(1).replace(" ", ""))
+                    except:
+                        pass
 
-                if price_rub and price_rub < MAX_PRICE_RUB and len(title) > 8:
-                    msg = f"✅ {title[:55]}... — {price_rub} ₽"
-                    print(msg)
-                    if progress_callback: progress_callback(msg)
-                    save_product(href, title, price_rub)
-                    saved_count += 1
+            if price_rub and price_rub < MAX_PRICE_RUB and len(title) > 8:
+                msg = f"✅ {title[:55]}... — {price_rub} ₽"
+                print(msg)
+                if progress_callback: progress_callback(msg)
+                save_product(href, title, price_rub)
+                saved_count += 1
 
-            msg = f"📦 Сохранено товаров дешевле {MAX_PRICE_RUB} ₽: {saved_count}"
-            print(msg)
-            if progress_callback: progress_callback(msg)
+        msg = f"📦 Сохранено товаров дешевле {MAX_PRICE_RUB} ₽: {saved_count}"
+        print(msg)
+        if progress_callback: progress_callback(msg)
 
         await browser.close()
     return saved_count
