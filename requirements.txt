@@ -3,4 +3,6 @@ playwright-stealth
 beautifulsoup4
 pandas
 python-dotenv
-sqlite3
+SQLAlchemy
+alembic
+asyncio
