@@ -6,10 +6,11 @@ import re
 from config import MAX_PRICE_RUB, BRAND_URLS
 from database import save_product, init_db
 
-async def scrape_ozon():
+async def scrape_ozon(headless: bool = False, progress_callback=None):
     init_db()
+    saved_count = 0
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(headless=headless)
         context = await browser.new_context(
             viewport={"width": 1920, "height": 1080},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -18,44 +19,58 @@ async def scrape_ozon():
         page = await context.new_page()
 
         for url in BRAND_URLS:
-            print(f"🔍 Парсим: {url}")
-            await page.goto(url, wait_until="networkidle", timeout=60000)
+            msg = f"🔍 Парсим: {url}"
+            print(msg)
+            if progress_callback: progress_callback(msg)
+
+            await page.goto(url, wait_until="networkidle", timeout=90000)
             await page.wait_for_timeout(4000)
+
+            # Прокручиваем вниз, чтобы подгрузить все товары
+            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            await page.wait_for_timeout(3000)
 
             content = await page.content()
             soup = BeautifulSoup(content, "lxml")
 
+            # Улучшенные селекторы для Ozon
             products = soup.select('div[data-widget="searchResultsV2"] a[href*="/product/"]')
             if not products:
-                products = soup.select('a[href*="/product/"]')
+                products = soup.select('a[href*="/product/"][class*="tile-hover"]')
+            if not products:
+                products = soup.select('article a[href*="/product/"]')
 
-            count = 0
-            for link in products[:60]:
+            for link in products[:100]:
                 href = link.get("href", "")
                 if not href.startswith("http"):
                     href = "https://www.ozon.ru" + href
 
-                title_tag = link.select_one('span, div')
-                title = title_tag.get_text(strip=True) if title_tag else "Без названия"
+                title = ""
+                title_tag = link.select_one('span, div, h3, h4')
+                if title_tag:
+                    title = title_tag.get_text(strip=True)
 
-                parent = link.parent
-                price_text = ""
+                price_rub = None
+                parent = link.find_parent()
                 if parent:
-                    price_span = parent.select_one('span')
-                    if price_span:
-                        price_text = price_span.get_text()
+                    price_text = parent.get_text()
+                    price_match = re.search(r'([\d\s]{3,})\s*₽', price_text)
+                    if price_match:
+                        try:
+                            price_rub = float(price_match.group(1).replace(" ", ""))
+                        except:
+                            pass
 
-                price_match = re.search(r'([\d\s]+)', price_text.replace("₽", ""))
-                if price_match:
-                    try:
-                        price_rub = float(price_match.group(1).replace(" ", ""))
-                        if price_rub < MAX_PRICE_RUB:
-                            print(f"✅ {title[:55]}... — {price_rub} ₽")
-                            save_product(href, title, price_rub)
-                            count += 1
-                    except:
-                        pass
+                if price_rub and price_rub < MAX_PRICE_RUB and len(title) > 8:
+                    msg = f"✅ {title[:55]}... — {price_rub} ₽"
+                    print(msg)
+                    if progress_callback: progress_callback(msg)
+                    save_product(href, title, price_rub)
+                    saved_count += 1
 
-            print(f"📦 Сохранено товаров дешевле {MAX_PRICE_RUB} ₽: {count}")
+            msg = f"📦 Сохранено товаров дешевле {MAX_PRICE_RUB} ₽: {saved_count}"
+            print(msg)
+            if progress_callback: progress_callback(msg)
 
         await browser.close()
+    return saved_count
