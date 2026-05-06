@@ -1,6 +1,6 @@
 # zn_prices
 
-**Ozon Price Tracker** — парсер цен на бренд Soulway (+другие запросы).
+**Ozon Price Tracker** — парсер цен на бренд Soulway (+ другие запросы).
 
 ## Установка
 
@@ -13,16 +13,27 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
-## Запуск
+## Запуск (GUI — рекомендуется)
 
 ```bash
 python run_parser.py
 ```
 
-## Настройки (config.py)
-- `MAX_PRICE_USD = 50` — макс. цена в долларах
-- Парсится бренд https://www.ozon.ru/brand/soul-way-100918703/
+Откроется красивое окно с кнопкой Запустить, настройкой цены и логами.
+
+### Консольный режим (headful)
+
+```bash
+python run_parser.py --console
+```
+
+## Настройки
+
+В `config.py`:
+- `MAX_PRICE_USD = 50` — максимальная цена в долларах
+
+В GUI можно менять цену прямо в окне.
 
 ## База данных
 
-`prices.db` (SQLite) — история цен, названия, ссылки.
+`prices.db` (SQLite) — история цен.
